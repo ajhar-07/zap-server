@@ -20,6 +20,7 @@ const port=process.env.PORT||3000
 
 
 const { MongoClient, ServerApiVersion, Db, ObjectId } = require('mongodb');
+const stripe = require('stripe')(process.env.PAYMENT_STRIPE)
 const app=express()
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.ufivfja.mongodb.net/?appName=Cluster0`;
 
@@ -61,6 +62,12 @@ async function run() {
     res.send(result)
   })
 
+  app.get('/parcels/:id', async(req,res)=>{
+    const id=req.params.id
+    const query={_id: new ObjectId(id)}
+    const result=await parcelsCollection.findOne(query)
+    res.send(result)
+  })
 
    app.get('/parcels', async (req, res) => {
   const email = req.query.email
@@ -73,6 +80,99 @@ async function run() {
 
   const result = await parcelsCollection.find(query,options).toArray()
   res.send(result)
+})
+
+//payment related API
+app.post('/payment-checkout-session', async (req, res) => {
+  try {
+    const paymentInfo = req.body;
+    const amount = parseInt(paymentInfo.cost) * 100;
+
+    const session = await stripe.checkout.sessions.create({
+      line_items: [
+        {
+          price_data: {
+            currency: 'usd',
+            unit_amount: amount,
+            product_data: {
+              name: paymentInfo.parcelName,
+            },
+          },
+          quantity: 1,
+        },
+      ],
+      customer_email: paymentInfo.senderEmail,
+      metadata: {
+        parcelId: paymentInfo.parcelId,
+      },
+      mode: 'payment',
+      success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
+    });
+
+    res.send({ url: session.url });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: error.message });
+  }
+});
+
+
+
+
+//payment old
+app.post('/create-checkout-session', async(req,res)=>{
+  const paymentInfo=req.body
+  const amount=parseInt(paymentInfo.cost)*100
+   const session = await stripe.checkout.sessions.create({
+    line_items: [
+      {
+        // Provide the exact Price ID (for example, price_1234) of the product you want to sell
+       price_data:{
+        currency:'usd',
+        unit_amount:amount,
+        product_data:{
+          name:paymentInfo.parcelName,
+
+        }
+       },
+        quantity: 1,
+      },
+    ],
+    customer_email:paymentInfo.senderEmail,
+    metadata:{
+      parcelId:paymentInfo.id,
+
+    },
+    mode: 'payment',
+    success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success`,
+    cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
+  });
+ console.log(session);
+ res.send({url:session.url})
+ 
+})
+
+
+app.patch('/payment-success', async(req,res)=>{
+  const sessionId=req.query.session_id
+ const session=await stripe.checkout.sessions.retrieve(sessionId)
+ console.log(session);
+ if(session.payment_status==="paid"){
+  const parcelId = session.metadata.parcelId; 
+
+  const query={_id:new ObjectId(parcelId)}
+  const update={
+    $set:{
+      paymentStatus:'paid',
+
+    }
+  }
+
+  const result=await parcelsCollection.updateOne(query,update)
+  res.send(result)
+ }
+  res.send({success:false})
 })
 
     await client.db("admin").command({ ping: 1 });
