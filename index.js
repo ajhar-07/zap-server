@@ -45,7 +45,7 @@ async function run() {
     await client.connect();
     const db=client.db('zap_DB')
     const parcelsCollection=db.collection('parcels')
-    
+    const paymentCollection=db.collection('payments')
     //parcels api
 
     app.post('/parcels', async(req,res)=>{
@@ -104,6 +104,7 @@ app.post('/payment-checkout-session', async (req, res) => {
       customer_email: paymentInfo.senderEmail,
       metadata: {
         parcelId: paymentInfo.parcelId,
+        parcelName:paymentInfo.parcelName,
       },
       mode: 'payment',
       success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
@@ -170,7 +171,26 @@ app.patch('/payment-success', async(req,res)=>{
   }
 
   const result=await parcelsCollection.updateOne(query,update)
-  res.send(result)
+  const payment={
+    amount:session.amount_total/100,
+    currency:session.currency,
+    customerEmail:session.customer_email,
+    parcelId:session.metadata.parcelId,
+    parcelName:session.metadata.parcelName,
+    transactionId:session.payment_intent,
+    paymentStatus:session.payment_status,
+    paidAt:new Date(),
+    trackingId:'',
+
+
+
+  }
+
+  if(session.payment_status==='paid'){
+       const result= await paymentCollection.insertOne(payment)
+       res.send({success:true,paymentInfo:resultPayment,modifyParcel:result})
+  }
+  // res.send(result)
  }
   res.send({success:false})
 })
